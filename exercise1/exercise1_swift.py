@@ -15,13 +15,10 @@ logger.addHandler(console)
 
 # hosts
 HOST_AUTH = 'cloud.lab.fi-ware.org:4730'
-HOST_CDMI = 'cloud.lab.fiware.org'
+HOST_OBJECT_STORAGE = 'cloud.lab.fiware.org'
 
 TEST_CONTAINER_NAME = 'guilleContainer'
-TEST_OBJECT_NAME = 'TestObjectPython2.txt'
-TEST_TEXT = 'Hello Developers of FIWARE Developers week!!!'
-
-MAX_FILES_IN_A_CONTAINER = 2
+TEST_OBJECT_NAME = 'fondo.png'
 
 def authentication_request(username, password):
     '''
@@ -60,11 +57,11 @@ def authentication_request(username, password):
     return json.loads(data)
 
 
-def cdmi_request(verb, resource, headers, body):
+def swift_request(verb, resource, headers, body):
     '''
     Do a HTTP request defined by HTTP verb, a Url, a dict of headers and a body.
     '''
-    conn = httplib.HTTPSConnection(HOST_CDMI)
+    conn = httplib.HTTPSConnection(HOST_OBJECT_STORAGE)
     conn.request(verb, "/Spain/object-store/v1/" + resource, body, headers)
     response = conn.getresponse()
 
@@ -82,28 +79,6 @@ def cdmi_request(verb, resource, headers, body):
     return result
 
 
-def create_container(token, auth, name):
-    headers = {"X-Auth-Token": token,
-               "Content-Type": "application/cdmi-container",
-               "Accept": "application/cdmi-container",
-               "X-CDMI-Specification-Version": "1.0.1"}
-    body = None
-    url = auth + "/" + name + "/"
-
-    return cdmi_request('PUT', url, headers, body)
-
-
-def list_container(token, auth, name):
-    headers = {"X-Auth-Token": token,
-               "Content-Type": "application/cdmi-container",
-               "Accept": "*/*",
-               "X-CDMI-Specification-Version": "1.0.1"}
-    body = None
-    url = auth + "/" + name + "/"
-
-    return cdmi_request('GET', url, headers, body)
-
-
 def store_text(token, auth, container_name, object_name, object_text):
     headers = {"X-Auth-Token": token,
                "Content-Type": "application/cdmi-object",
@@ -112,30 +87,49 @@ def store_text(token, auth, container_name, object_name, object_text):
     body = '{"mimetype":"text/plain", "metadata":{}, "value" : "' + object_text + '"}'
     url = auth + "/" + container_name + "/" + object_name
 
-    return cdmi_request('PUT', url, headers, body)
+    return swift_request('PUT', url, headers, body)
 
-
-def retrieve_text(token, auth, container_name, object_name):
+def upload_file(token, auth, container_name, object_name):
     headers = {"X-Auth-Token": token,
-               "Content-Type": "application/cdmi-object",
-               "Accept": "*/*",
-               "X-CDMI-Specification-Version": "1.0.1"}
+               "Content-type": "application/octet-stream"}
+
+    f = open(object_name, 'rb')
+    chunck = f.read()
+    f.close()
+    url = auth + "/" + container_name + "/" + object_name
+    body = chunck.encode(encoding='base64')
+    return swift_request('PUT', url, headers, body)
+
+
+def retrieve_object(token, auth, container_name, object_name):
+    headers = {"X-Auth-Token": token,
+               "Accept": "*/*"}
     body = None
     url = auth + "/" + container_name + "/" + object_name
+    with open(object_name, 'wb') as handle:
+        response = swift_request('GET', url, headers, body)
+        #for block in response.iter_content(1024):
+        #   if not block:
+        #      break
+        myresponse = response.replace('\\"','"')
+        if myresponse.__contains__('"valuetransferencoding":"base64"'):
+            myresponse = myresponse[1:-1]
+            myresponse = json.loads(myresponse)['value'].decode(encoding='base64')
 
-    return cdmi_request('GET', url, headers, body)
+        handle.write(myresponse)
 
+    return response
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print 'Usage: exercise2.py <username> <password>'
+        print 'Usage: exercise1_swift.py <username> <password>'
         sys.exit(128)
 
     username = sys.argv[1]
     password = sys.argv[2]
 
     # display basic info
-    logger.info('Object storage host is: ' + HOST_CDMI)
+    logger.info('Object storage host is: ' + HOST_OBJECT_STORAGE)
     logger.info('Authorisation host is: ' + HOST_AUTH)
 
     # get authentication response
@@ -156,23 +150,11 @@ if __name__ == '__main__':
 
     # perform some basic Object Store operations
 
+    #response = store_text(token, auth, TEST_CONTAINER_NAME, TEST_OBJECT_NAME, TEST_TEXT)
+    #logger.info('Store Text Response: ' + response)
 
-    response = list_container(token, auth, TEST_CONTAINER_NAME)
-    logger.info('List Container Response: ' + response)
-    n_files = len(json.loads(response)['children'])
-    logger.info('Number of files: %d' % n_files)
+    response = upload_file(token, auth, TEST_CONTAINER_NAME, TEST_OBJECT_NAME)
+    logger.info('Upload File Response: ' + response)
 
-
-
-    if n_files > MAX_FILES_IN_A_CONTAINER:
-        TEST_CONTAINER_NAME = "NewContainer"
-
-    response = create_container(token, auth, TEST_CONTAINER_NAME)
-    logger.info('Create Container Response: ' + response)
-
-    response = store_text(token, auth, TEST_CONTAINER_NAME, TEST_OBJECT_NAME, TEST_TEXT)
-    logger.info('Store Text Response: ' + response)
-
-    response = retrieve_text(token, auth, TEST_CONTAINER_NAME, TEST_OBJECT_NAME)
+    response = retrieve_object(token, auth, TEST_CONTAINER_NAME, TEST_OBJECT_NAME)
     logger.info('Retrieve Text Response: ' + response)
-
